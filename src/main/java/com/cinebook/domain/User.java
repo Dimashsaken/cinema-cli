@@ -1,6 +1,7 @@
 package com.cinebook.domain;
 
 import com.cinebook.domain.enums.Role;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 /** A registered user of the system. */
 public class User {
@@ -19,6 +20,12 @@ public class User {
         this.passwordHash = passwordHash;
         this.salt = salt;
         this.role = role;
+    }
+
+    /** Check if this user has the ADMIN role. */
+    @JsonIgnore
+    public boolean isAdmin() {
+        return role == Role.ADMIN;
     }
 
     public String getUserId() { return userId; }

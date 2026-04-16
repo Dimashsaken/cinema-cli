@@ -5,7 +5,12 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
-/** A confirmed or pending booking of one or more seats for a showtime. */
+/**
+ * A booking of one or more seats for a showtime.
+ *
+ * <p>The {@code version} field supports optimistic concurrency control —
+ * it increments on every state change.
+ */
 public class Booking {
 
     private String bookingId;
@@ -30,6 +35,48 @@ public class Booking {
         this.status = status;
         this.createdAt = createdAt;
         this.version = version;
+    }
+
+    /**
+     * Transition PENDING -> CONFIRMED.
+     *
+     * @throws IllegalStateException if not currently PENDING
+     */
+    public void confirm() {
+        if (status != BookingStatus.PENDING) {
+            throw new IllegalStateException(
+                    "Cannot confirm booking " + bookingId + ": status is " + status);
+        }
+        this.status = BookingStatus.CONFIRMED;
+        this.version++;
+    }
+
+    /**
+     * Transition PENDING or CONFIRMED -> CANCELLED.
+     *
+     * @throws IllegalStateException if already CANCELLED or REFUNDED
+     */
+    public void cancel() {
+        if (status == BookingStatus.CANCELLED || status == BookingStatus.REFUNDED) {
+            throw new IllegalStateException(
+                    "Cannot cancel booking " + bookingId + ": status is " + status);
+        }
+        this.status = BookingStatus.CANCELLED;
+        this.version++;
+    }
+
+    /**
+     * Transition CONFIRMED -> REFUNDED (inverse of confirm).
+     *
+     * @throws IllegalStateException if not currently CONFIRMED
+     */
+    public void refund() {
+        if (status != BookingStatus.CONFIRMED) {
+            throw new IllegalStateException(
+                    "Cannot refund booking " + bookingId + ": status is " + status);
+        }
+        this.status = BookingStatus.REFUNDED;
+        this.version++;
     }
 
     public String getBookingId() { return bookingId; }
