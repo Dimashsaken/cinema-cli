@@ -23,22 +23,27 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Orchestrates the booking workflow: hold seats, confirm booking, cancel, refund.
  *
- * <p>This is the single-threaded version. Concurrency (locking) is added
- * in Phase 8 via BookingManager.
+ * <p>Thread safety is enforced via {@link BookingManager}, which provides
+ * a per-showtime {@link ReentrantLock}. All seat mutations acquire the lock
+ * with a 2-second timeout to prevent deadlocks.
  */
 public class BookingService {
 
     private static final Logger log = LoggerFactory.getLogger(BookingService.class);
     private static final long HOLD_TTL_MINUTES = 5;
+    private static final long LOCK_TIMEOUT_SECONDS = 2;
 
     private final ShowtimeRepository showtimeRepository;
     private final BookingRepository bookingRepository;
     private final PricingService pricingService;
     private final TransactionLog transactionLog;
+    private final BookingManager bookingManager;
 
     public BookingService(ShowtimeRepository showtimeRepository,
                           BookingRepository bookingRepository,
@@ -48,6 +53,7 @@ public class BookingService {
         this.bookingRepository = bookingRepository;
         this.pricingService = pricingService;
         this.transactionLog = transactionLog;
+        this.bookingManager = BookingManager.getInstance();
     }
 
     /**
@@ -67,36 +73,54 @@ public class BookingService {
             throw new InvalidInputException("Must select at least one seat");
         }
 
-        Showtime showtime = findShowtime(showtimeId);
+        // Validate showtime exists before acquiring lock
+        findShowtime(showtimeId);
 
-        // Resolve all seats first, validating codes
-        List<Seat> seats = resolveSeats(showtime, seatCodes);
-
-        // Check all seats are available before modifying any
-        for (Seat seat : seats) {
-            if (seat.getStatus() != SeatStatus.AVAILABLE) {
+        ReentrantLock lock = bookingManager.getLock(showtimeId);
+        try {
+            if (!lock.tryLock(LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 throw new SeatUnavailableException(
-                        "Seat " + seat.getCode() + " is " + seat.getStatus());
+                        "Could not acquire lock for showtime " + showtimeId + ". Try again.");
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SeatUnavailableException("Interrupted while waiting for lock");
         }
 
-        Instant expiresAt = Instant.now().plus(HOLD_TTL_MINUTES, ChronoUnit.MINUTES);
+        try {
+            // Re-fetch showtime inside lock to get latest state
+            Showtime showtime = findShowtime(showtimeId);
+            List<Seat> seats = resolveSeats(showtime, seatCodes);
 
-        // WAL: log the hold before mutating state
-        logWal(() -> transactionLog.logHold(showtimeId, userId, seatCodes));
+            // Check all seats are available before modifying any
+            for (Seat seat : seats) {
+                if (seat.getStatus() != SeatStatus.AVAILABLE) {
+                    throw new SeatUnavailableException(
+                            "Seat " + seat.getCode() + " is " + seat.getStatus());
+                }
+            }
 
-        // Transition all seats to HELD
-        for (Seat seat : seats) {
-            seat.hold(userId, expiresAt);
+            Instant expiresAt = Instant.now().plus(HOLD_TTL_MINUTES, ChronoUnit.MINUTES);
+
+            // WAL: log the hold before mutating state
+            logWal(() -> transactionLog.logHold(showtimeId, userId, seatCodes));
+
+            // Transition all seats to HELD
+            for (Seat seat : seats) {
+                seat.hold(userId, expiresAt);
+            }
+
+            // Persist the showtime with updated seat states
+            showtimeRepository.save(showtime);
+
+            String tokenId = UUID.randomUUID().toString().substring(0, 8);
+            HoldToken token = new HoldToken(tokenId, showtimeId, userId, seatCodes, expiresAt);
+            log.info("Held {} seats for user {} on showtime {}",
+                    seatCodes.size(), userId, showtimeId);
+            return token;
+        } finally {
+            lock.unlock();
         }
-
-        // Persist the showtime with updated seat states
-        showtimeRepository.save(showtime);
-
-        String tokenId = UUID.randomUUID().toString().substring(0, 8);
-        HoldToken token = new HoldToken(tokenId, showtimeId, userId, seatCodes, expiresAt);
-        log.info("Held {} seats for user {} on showtime {}", seatCodes.size(), userId, showtimeId);
-        return token;
     }
 
     /**
@@ -115,52 +139,68 @@ public class BookingService {
             throw new HoldExpiredException("Hold has expired. Please select seats again.");
         }
 
-        Showtime showtime = findShowtimeUnchecked(holdToken.getShowtimeId());
-        List<Seat> seats = resolveSeatsUnchecked(showtime, holdToken.getSeats());
-
-        // Verify all seats are still held by this user
-        for (Seat seat : seats) {
-            if (seat.getStatus() != SeatStatus.HELD) {
+        ReentrantLock lock = bookingManager.getLock(holdToken.getShowtimeId());
+        try {
+            if (!lock.tryLock(LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 throw new SeatUnavailableException(
-                        "Seat " + seat.getCode() + " is no longer held (status: " + seat.getStatus() + ")");
+                        "Could not acquire lock for confirmation. Try again.");
             }
-            if (!holdToken.getUserId().equals(seat.getHeldBy())) {
-                throw new SeatUnavailableException(
-                        "Seat " + seat.getCode() + " is held by a different user");
-            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SeatUnavailableException("Interrupted while waiting for lock");
         }
 
-        // Calculate total price
-        BigDecimal totalPrice = pricingService.calculateTotal(showtime, seats, discountCode);
+        try {
+            Showtime showtime = findShowtimeUnchecked(holdToken.getShowtimeId());
+            List<Seat> seats = resolveSeatsUnchecked(showtime, holdToken.getSeats());
 
-        // Transition HELD -> BOOKED
-        for (Seat seat : seats) {
-            seat.book(holdToken.getUserId());
+            // Verify all seats are still held by this user
+            for (Seat seat : seats) {
+                if (seat.getStatus() != SeatStatus.HELD) {
+                    throw new SeatUnavailableException(
+                            "Seat " + seat.getCode() + " is no longer held (status: "
+                                    + seat.getStatus() + ")");
+                }
+                if (!holdToken.getUserId().equals(seat.getHeldBy())) {
+                    throw new SeatUnavailableException(
+                            "Seat " + seat.getCode() + " is held by a different user");
+                }
+            }
+
+            // Calculate total price
+            BigDecimal totalPrice = pricingService.calculateTotal(showtime, seats, discountCode);
+
+            // Transition HELD -> BOOKED
+            for (Seat seat : seats) {
+                seat.book(holdToken.getUserId());
+            }
+
+            // Create booking
+            String bookingId = generateBookingId();
+            Booking booking = new Booking(
+                    bookingId,
+                    holdToken.getUserId(),
+                    holdToken.getShowtimeId(),
+                    holdToken.getSeats(),
+                    totalPrice,
+                    BookingStatus.PENDING,
+                    Instant.now(),
+                    1
+            );
+            booking.confirm();
+
+            // Persist
+            showtimeRepository.save(showtime);
+            bookingRepository.save(booking);
+
+            // WAL: log commit
+            logWal(() -> transactionLog.logCommit(bookingId));
+
+            log.info("Confirmed booking {} for user {}", bookingId, holdToken.getUserId());
+            return booking;
+        } finally {
+            lock.unlock();
         }
-
-        // Create booking
-        String bookingId = generateBookingId();
-        Booking booking = new Booking(
-                bookingId,
-                holdToken.getUserId(),
-                holdToken.getShowtimeId(),
-                holdToken.getSeats(),
-                totalPrice,
-                BookingStatus.PENDING,
-                Instant.now(),
-                1
-        );
-        booking.confirm();
-
-        // Persist
-        showtimeRepository.save(showtime);
-        bookingRepository.save(booking);
-
-        // WAL: log commit
-        logWal(() -> transactionLog.logCommit(bookingId));
-
-        log.info("Confirmed booking {} for user {}", bookingId, holdToken.getUserId());
-        return booking;
     }
 
     /**
