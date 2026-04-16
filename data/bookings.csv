@@ -1,1 +1,2 @@
 bookingId,userId,showtimeId,seats,totalPrice,status,createdAt,version
+BK-20260416-2608,U001,ST001,"D6;D7",160.0,CONFIRMED,2026-04-16T06:52:24.408418Z,2
