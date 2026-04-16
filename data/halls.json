@@ -1,0 +1,14 @@
+[
+  {
+    "hallId": "H1",
+    "rows": 5,
+    "cols": 8,
+    "vipRows": [0, 1]
+  },
+  {
+    "hallId": "H2",
+    "rows": 6,
+    "cols": 10,
+    "vipRows": [0, 1]
+  }
+]

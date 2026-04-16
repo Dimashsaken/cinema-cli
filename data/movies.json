@@ -1,0 +1,23 @@
+[
+  {
+    "movieId": "M001",
+    "title": "Dune Part Two",
+    "durationMin": 166,
+    "rating": "PG-13",
+    "genre": "Sci-Fi"
+  },
+  {
+    "movieId": "M002",
+    "title": "The Batman",
+    "durationMin": 176,
+    "rating": "PG-13",
+    "genre": "Action"
+  },
+  {
+    "movieId": "M003",
+    "title": "Interstellar",
+    "durationMin": 169,
+    "rating": "PG-13",
+    "genre": "Sci-Fi"
+  }
+]

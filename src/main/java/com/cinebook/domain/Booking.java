@@ -1,0 +1,58 @@
+package com.cinebook.domain;
+
+import com.cinebook.domain.enums.BookingStatus;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+
+/** A confirmed or pending booking of one or more seats for a showtime. */
+public class Booking {
+
+    private String bookingId;
+    private String userId;
+    private String showtimeId;
+    private List<String> seats;
+    private BigDecimal totalPrice;
+    private BookingStatus status;
+    private Instant createdAt;
+    private int version;
+
+    public Booking() {}
+
+    public Booking(String bookingId, String userId, String showtimeId,
+                   List<String> seats, BigDecimal totalPrice, BookingStatus status,
+                   Instant createdAt, int version) {
+        this.bookingId = bookingId;
+        this.userId = userId;
+        this.showtimeId = showtimeId;
+        this.seats = seats;
+        this.totalPrice = totalPrice;
+        this.status = status;
+        this.createdAt = createdAt;
+        this.version = version;
+    }
+
+    public String getBookingId() { return bookingId; }
+    public void setBookingId(String bookingId) { this.bookingId = bookingId; }
+
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
+
+    public String getShowtimeId() { return showtimeId; }
+    public void setShowtimeId(String showtimeId) { this.showtimeId = showtimeId; }
+
+    public List<String> getSeats() { return seats; }
+    public void setSeats(List<String> seats) { this.seats = seats; }
+
+    public BigDecimal getTotalPrice() { return totalPrice; }
+    public void setTotalPrice(BigDecimal totalPrice) { this.totalPrice = totalPrice; }
+
+    public BookingStatus getStatus() { return status; }
+    public void setStatus(BookingStatus status) { this.status = status; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public int getVersion() { return version; }
+    public void setVersion(int version) { this.version = version; }
+}

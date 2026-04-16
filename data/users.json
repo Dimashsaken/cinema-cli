@@ -1,0 +1,16 @@
+[
+  {
+    "userId": "U001",
+    "username": "saken",
+    "passwordHash": "361eb939f2318b1b039f3ce7dca7ad8066d1389f8d6d49b501a5d72ab5bb0eaf",
+    "salt": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
+    "role": "CUSTOMER"
+  },
+  {
+    "userId": "U002",
+    "username": "admin",
+    "passwordHash": "695f67c012e6546d6897134b4b28345dc0fcdc23aa91d3d1f48e1d9c03087b07",
+    "salt": "f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1",
+    "role": "ADMIN"
+  }
+]
